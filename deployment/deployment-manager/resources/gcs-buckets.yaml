@@ -1,0 +1,167 @@
+
+# Google Cloud Storage Buckets Configuration
+
+# 
+# Creates all the storage buckets needed for the financial data pipeline:
+# - Raw data bucket (NiFi dumps data here)
+# - Processed data bucket (Spark outputs go here)
+# - Backup bucket (BigQuery exports and backups)
+# - Code bucket (PySpark jobs and scripts)
+#
+
+
+resources:
+  
+  # RAW DATA BUCKET - Where NiFi dumps financial data from APIs
+  # =============================================================================
+  - name: {{ properties["rawDataBucket"] }}
+    type: storage.v1.bucket
+    properties:
+      name: {{ properties["rawDataBucket"] }}
+      location: {{ properties["region"] }}
+      storageClass: STANDARD
+      versioning:
+        enabled: true
+      lifecycle:
+        rule:
+          - condition:
+              age: 30
+              matchesStorageClass: [STANDARD]
+            action:
+              type: SetStorageClass
+              storageClass: NEARLINE
+          - condition:
+              age: 90
+              matchesStorageClass: [NEARLINE]
+            action:
+              type: SetStorageClass
+              storageClass: COLDLINE
+          - condition:
+              age: 365
+            action:
+              type: Delete
+      cors:
+        - origin: ['*']
+          method: [GET, POST, PUT]
+          responseHeader: ['Content-Type']
+          maxAgeSeconds: 3600
+
+  # =============================================================================
+  # PROCESSED DATA BUCKET - Where Spark outputs transformed data
+  # =============================================================================
+  - name: {{ properties["processedDataBucket"] }}
+    type: storage.v1.bucket
+    properties:
+      name: {{ properties["processedDataBucket"] }}
+      location: {{ properties["region"] }}
+      storageClass: STANDARD
+      versioning:
+        enabled: true
+      lifecycle:
+        rule:
+          - condition:
+              age: 90
+              matchesStorageClass: [STANDARD]
+            action:
+              type: SetStorageClass
+              storageClass: NEARLINE
+          - condition:
+              age: 365
+              matchesStorageClass: [NEARLINE]
+            action:
+              type: SetStorageClass
+              storageClass: COLDLINE
+          - condition:
+              age: 2555  # ~7 years
+            action:
+              type: Delete
+
+  
+  # BACKUP BUCKET - For BigQuery exports and system backups
+ 
+  - name: {{ properties["backupBucket"] }}
+    type: storage.v1.bucket
+    properties:
+      name: {{ properties["backupBucket"] }}
+      location: {{ properties["region"] }}
+      storageClass: NEARLINE  # Cheaper for backups
+      versioning:
+        enabled: true
+      lifecycle:
+        rule:
+          - condition:
+              age: 30
+              matchesStorageClass: [NEARLINE]
+            action:
+              type: SetStorageClass
+              storageClass: COLDLINE
+          - condition:
+              age: 2555  # ~7 years (financial compliance)
+            action:
+              type: Delete
+
+  
+  # CODE BUCKET - For PySpark jobs, scripts, and configuration files
+  
+  - name: {{ properties["codeBucket"] }}
+    type: storage.v1.bucket
+    properties:
+      name: {{ properties["codeBucket"] }}
+      location: {{ properties["region"] }}
+      storageClass: STANDARD
+      versioning:
+        enabled: true
+      lifecycle:
+        rule:
+          - condition:
+              age: 365
+              matchesStorageClass: [STANDARD]
+            action:
+              type: SetStorageClass
+              storageClass: NEARLINE
+      # Public read access for code artifacts (if needed)
+      predefinedAcl: publicRead
+      defaultObjectAcl:
+        - entity: allUsers
+          role: READER
+
+
+# BUCKET NOTIFICATIONS - Trigger Cloud Functions when data arrives
+
+  - name: raw-data-bucket-notification
+    type: pubsub.v1.topic
+    properties:
+      topic: financial-raw-data-notifications
+
+  - name: processed-data-bucket-notification  
+    type: pubsub.v1.topic
+    properties:
+      topic: financial-processed-data-notifications
+
+# =============================================================================
+# OUTPUTS
+# =============================================================================
+outputs:
+  - name: rawDataBucket
+    value: {{ properties["rawDataBucket"] }}
+  
+  - name: processedDataBucket
+    value: {{ properties["processedDataBucket"] }}
+  
+  - name: backupBucket
+    value: {{ properties["backupBucket"] }}
+  
+  - name: codeBucket
+    value: {{ properties["codeBucket"] }}
+  
+  - name: rawDataBucketUrl
+    value: gs://{{ properties["rawDataBucket"] }}
+  
+  - name: processedDataBucketUrl
+    value: gs://{{ properties["processedDataBucket"] }}
+  
+  - name: backupBucketUrl
+    value: gs://{{ properties["backupBucket"] }}
+  
+  - name: codeBucketUrl
+    value: gs://{{ properties["codeBucket"] }}

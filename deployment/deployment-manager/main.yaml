@@ -1,0 +1,129 @@
+# =============================================================================
+# GCP Deployment Manager - Main Infrastructure Template
+# =============================================================================
+# 
+# This is the master template that orchestrates the entire financial data pipeline
+# infrastructure on Google Cloud Platform.
+#
+# Usage:
+#   gcloud deployment-manager deployments create financial-pipeline \
+#     --config deployment/deployment-manager/main.yaml \
+#     --properties zone:us-central1-a,region:us-central1
+#
+#========
+
+imports:
+  - path: resources/gcs-buckets.yaml
+  - path: resources/bigquery-dataset.yaml
+  - path: resources/compute-instance.yaml
+  - path: resources/iam-roles.yaml
+  - path: resources/cloud-functions.yaml
+
+resources:
+  
+  # IAM ROLES AND SERVICE ACCOUNTS
+ 
+  - name: financial-pipeline-iam
+    type: resources/iam-roles.yaml
+    properties:
+      project: $(ref.project)
+      serviceAccountName: financial-pipeline-sa
+
+ 
+  # CLOUD STORAGE BUCKETS
+  
+  - name: financial-data-storage
+    type: resources/gcs-buckets.yaml
+    properties:
+      project: $(ref.project)
+      region: {{ properties["region"] }}
+      rawDataBucket: $(ref.project)-financial-raw-data
+      processedDataBucket: $(ref.project)-financial-processed-data
+      backupBucket: $(ref.project)-financial-backups
+      codeBucket: $(ref.project)-financial-code
+
+
+  # BIGQUERY DATASET AND TABLES
+  
+  - name: financial-bigquery-setup
+    type: resources/bigquery-dataset.yaml
+    properties:
+      project: $(ref.project)
+      datasetId: financial_data
+      location: {{ properties["region"] }}
+
+  
+  # COMPUTE ENGINE INSTANCE FOR APACHE NIFI
+  
+  - name: nifi-compute-instance
+    type: resources/compute-instance.yaml
+    properties:
+      project: $(ref.project)
+      zone: {{ properties["zone"] }}
+      region: {{ properties["region"] }}
+      instanceName: financial-nifi-vm
+      machineType: e2-standard-4
+      diskSizeGb: 100
+      serviceAccount: $(ref.financial-pipeline-iam.serviceAccountEmail)
+      rawDataBucket: $(ref.financial-data-storage.rawDataBucket)
+      codeBucket: $(ref.financial-data-storage.codeBucket)
+
+  # CLOUD FUNCTIONS FOR PIPELINE ORCHESTRATION
+  
+  - name: pipeline-cloud-functions
+    type: resources/cloud-functions.yaml
+    properties:
+      project: $(ref.project)
+      region: {{ properties["region"] }}
+      serviceAccount: $(ref.financial-pipeline-iam.serviceAccountEmail)
+      rawDataBucket: $(ref.financial-data-storage.rawDataBucket)
+      processedDataBucket: $(ref.financial-data-storage.processedDataBucket)
+      codeBucket: $(ref.financial-data-storage.codeBucket)
+
+# OUTPUTS - Important values for other scripts and configurations
+
+outputs:
+  - name: projectId
+    value: $(ref.project)
+  
+  - name: serviceAccountEmail
+    value: $(ref.financial-pipeline-iam.serviceAccountEmail)
+  
+  - name: rawDataBucket
+    value: $(ref.financial-data-storage.rawDataBucket)
+  
+  - name: processedDataBucket
+    value: $(ref.financial-data-storage.processedDataBucket)
+  
+  - name: backupBucket
+    value: $(ref.financial-data-storage.backupBucket)
+  
+  - name: codeBucket
+    value: $(ref.financial-data-storage.codeBucket)
+  
+  - name: nifiInstanceName
+    value: $(ref.nifi-compute-instance.instanceName)
+  
+  - name: nifiInternalIP
+    value: $(ref.nifi-compute-instance.internalIP)
+  
+  - name: nifiExternalIP
+    value: $(ref.nifi-compute-instance.externalIP)
+  
+  - name: bigqueryDataset
+    value: $(ref.financial-bigquery-setup.datasetId)
+  
+  - name: gcsDataTriggerFunction
+    value: $(ref.pipeline-cloud-functions.gcsDataTriggerFunction)
+  
+  - name: dataprocLauncherFunction
+    value: $(ref.pipeline-cloud-functions.dataprocLauncherFunction)
+
+
+# DEPLOYMENT METADATA
+
+metadata:
+  version: "1.0"
+  description: "Financial Data Pipeline Infrastructure"
+  author: "GCP Financial Pipeline Project"
+  creationTimestamp: "2025-08-10"

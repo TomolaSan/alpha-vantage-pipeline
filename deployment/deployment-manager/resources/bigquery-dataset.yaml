@@ -1,0 +1,359 @@
+# BigQuery Dataset and Tables Configuration
+
+# 
+# Creates the BigQuery dataset and tables for financial data analytics:
+# - Raw stock data table (direct from APIs)
+# - Processed stock data table (cleaned and enriched)
+# - Technical indicators table (calculated metrics)
+# - Market summary views
+#
+
+
+resources:
+  
+  # BIGQUERY DATASET
+ 
+  - name: {{ properties["datasetId"] }}
+    type: bigquery.v2.dataset
+    properties:
+      datasetReference:
+        datasetId: {{ properties["datasetId"] }}
+        projectId: {{ properties["project"] }}
+      location: {{ properties["location"] }}
+      description: "Financial data pipeline dataset for stock market analytics"
+      defaultTableExpirationMs: 31536000000  # 1 year in milliseconds
+      access:
+        - role: OWNER
+          userByEmail: $(ref.project)@appspot.gserviceaccount.com
+        - role: READER
+          specialGroup: projectReaders
+        - role: WRITER
+          specialGroup: projectEditors
+
+ 
+  # RAW STOCK DATA TABLE
+  # =============================================================================
+  - name: raw-stock-data-table
+    type: bigquery.v2.table
+    properties:
+      tableReference:
+        projectId: {{ properties["project"] }}
+        datasetId: {{ properties["datasetId"] }}
+        tableId: raw_stock_data
+      description: "Raw stock market data directly from Alpha Vantage API"
+      schema:
+        fields:
+          - name: symbol
+            type: STRING
+            mode: REQUIRED
+            description: "Stock ticker symbol (e.g., AAPL, GOOGL)"
+          - name: date
+            type: DATE
+            mode: REQUIRED
+            description: "Trading date"
+          - name: timestamp
+            type: TIMESTAMP
+            mode: REQUIRED
+            description: "Data ingestion timestamp"
+          - name: open_price
+            type: FLOAT
+            mode: NULLABLE
+            description: "Opening price for the trading day"
+          - name: high_price
+            type: FLOAT
+            mode: NULLABLE
+            description: "Highest price during the trading day"
+          - name: low_price
+            type: FLOAT
+            mode: NULLABLE
+            description: "Lowest price during the trading day"
+          - name: close_price
+            type: FLOAT
+            mode: NULLABLE
+            description: "Closing price for the trading day"
+          - name: adjusted_close
+            type: FLOAT
+            mode: NULLABLE
+            description: "Adjusted closing price (accounts for splits/dividends)"
+          - name: volume
+            type: INTEGER
+            mode: NULLABLE
+            description: "Number of shares traded"
+          - name: dividend_amount
+            type: FLOAT
+            mode: NULLABLE
+            description: "Dividend amount per share"
+          - name: split_coefficient
+            type: FLOAT
+            mode: NULLABLE
+            description: "Stock split coefficient"
+          - name: source_api
+            type: STRING
+            mode: NULLABLE
+            description: "Source API (alpha_vantage, yahoo_finance, etc.)"
+          - name: data_quality_score
+            type: FLOAT
+            mode: NULLABLE
+            description: "Data quality score (0-1)"
+          - name: ingestion_batch_id
+            type: STRING
+            mode: NULLABLE
+            description: "Batch ID for tracking data lineage"
+      timePartitioning:
+        type: DAY
+        field: date
+      clustering:
+        fields: ["symbol", "date"]
+
+ 
+  # PROCESSED STOCK DATA TABLE
+  # =============================================================================
+  - name: processed-stock-data-table
+    type: bigquery.v2.table
+    properties:
+      tableReference:
+        projectId: {{ properties["project"] }}
+        datasetId: {{ properties["datasetId"] }}
+        tableId: processed_stock_data
+      description: "Cleaned and enriched stock market data"
+      schema:
+        fields:
+          - name: symbol
+            type: STRING
+            mode: REQUIRED
+          - name: date
+            type: DATE
+            mode: REQUIRED
+          - name: timestamp
+            type: TIMESTAMP
+            mode: REQUIRED
+          - name: open_price
+            type: FLOAT
+            mode: NULLABLE
+          - name: high_price
+            type: FLOAT
+            mode: NULLABLE
+          - name: low_price
+            type: FLOAT
+            mode: NULLABLE
+          - name: close_price
+            type: FLOAT
+            mode: NULLABLE
+          - name: adjusted_close
+            type: FLOAT
+            mode: NULLABLE
+          - name: volume
+            type: INTEGER
+            mode: NULLABLE
+          - name: price_change
+            type: FLOAT
+            mode: NULLABLE
+            description: "Daily price change (close - previous close)"
+          - name: price_change_percent
+            type: FLOAT
+            mode: NULLABLE
+            description: "Daily price change percentage"
+          - name: volatility
+            type: FLOAT
+            mode: NULLABLE
+            description: "Price volatility measure"
+          - name: market_cap_category
+            type: STRING
+            mode: NULLABLE
+            description: "Large/Mid/Small cap classification"
+          - name: sector
+            type: STRING
+            mode: NULLABLE
+            description: "Stock sector classification"
+          - name: industry
+            type: STRING
+            mode: NULLABLE
+            description: "Stock industry classification"
+          - name: is_trading_day
+            type: BOOLEAN
+            mode: NULLABLE
+            description: "Whether this was a valid trading day"
+          - name: processing_timestamp
+            type: TIMESTAMP
+            mode: REQUIRED
+            description: "When this record was processed"
+      timePartitioning:
+        type: DAY
+        field: date
+      clustering:
+        fields: ["symbol", "sector", "date"]
+
+  # =============================================================================
+  # TECHNICAL INDICATORS TABLE
+  # =============================================================================
+  - name: technical-indicators-table
+    type: bigquery.v2.table
+    properties:
+      tableReference:
+        projectId: {{ properties["project"] }}
+        datasetId: {{ properties["datasetId"] }}
+        tableId: technical_indicators
+      description: "Technical analysis indicators and calculated metrics"
+      schema:
+        fields:
+          - name: symbol
+            type: STRING
+            mode: REQUIRED
+          - name: date
+            type: DATE
+            mode: REQUIRED
+          - name: timestamp
+            type: TIMESTAMP
+            mode: REQUIRED
+          - name: sma_20
+            type: FLOAT
+            mode: NULLABLE
+            description: "20-day Simple Moving Average"
+          - name: sma_50
+            type: FLOAT
+            mode: NULLABLE
+            description: "50-day Simple Moving Average"
+          - name: sma_200
+            type: FLOAT
+            mode: NULLABLE
+            description: "200-day Simple Moving Average"
+          - name: ema_12
+            type: FLOAT
+            mode: NULLABLE
+            description: "12-day Exponential Moving Average"
+          - name: ema_26
+            type: FLOAT
+            mode: NULLABLE
+            description: "26-day Exponential Moving Average"
+          - name: rsi_14
+            type: FLOAT
+            mode: NULLABLE
+            description: "14-day Relative Strength Index"
+          - name: macd_line
+            type: FLOAT
+            mode: NULLABLE
+            description: "MACD Line (EMA12 - EMA26)"
+          - name: macd_signal
+            type: FLOAT
+            mode: NULLABLE
+            description: "MACD Signal Line (9-day EMA of MACD)"
+          - name: macd_histogram
+            type: FLOAT
+            mode: NULLABLE
+            description: "MACD Histogram (MACD - Signal)"
+          - name: bollinger_upper
+            type: FLOAT
+            mode: NULLABLE
+            description: "Bollinger Band Upper (SMA20 + 2*StdDev)"
+          - name: bollinger_middle
+            type: FLOAT
+            mode: NULLABLE
+            description: "Bollinger Band Middle (SMA20)"
+          - name: bollinger_lower
+            type: FLOAT
+            mode: NULLABLE
+            description: "Bollinger Band Lower (SMA20 - 2*StdDev)"
+          - name: atr_14
+            type: FLOAT
+            mode: NULLABLE
+            description: "14-day Average True Range"
+          - name: stochastic_k
+            type: FLOAT
+            mode: NULLABLE
+            description: "Stochastic Oscillator %K"
+          - name: stochastic_d
+            type: FLOAT
+            mode: NULLABLE
+            description: "Stochastic Oscillator %D"
+          - name: williams_r
+            type: FLOAT
+            mode: NULLABLE
+            description: "Williams %R indicator"
+          - name: calculation_timestamp
+            type: TIMESTAMP
+            mode: REQUIRED
+            description: "When indicators were calculated"
+      timePartitioning:
+        type: DAY
+        field: date
+      clustering:
+        fields: ["symbol", "date"]
+
+  # =============================================================================
+  # MARKET SUMMARY TABLE
+  # =============================================================================
+  - name: market-summary-table
+    type: bigquery.v2.table
+    properties:
+      tableReference:
+        projectId: {{ properties["project"] }}
+        datasetId: {{ properties["datasetId"] }}
+        tableId: market_summary
+      description: "Daily market summary and aggregate statistics"
+      schema:
+        fields:
+          - name: date
+            type: DATE
+            mode: REQUIRED
+          - name: total_volume
+            type: INTEGER
+            mode: NULLABLE
+            description: "Total market volume for the day"
+          - name: advancing_stocks
+            type: INTEGER
+            mode: NULLABLE
+            description: "Number of stocks that gained value"
+          - name: declining_stocks
+            type: INTEGER
+            mode: NULLABLE
+            description: "Number of stocks that lost value"
+          - name: unchanged_stocks
+            type: INTEGER
+            mode: NULLABLE
+            description: "Number of stocks with no price change"
+          - name: average_price_change
+            type: FLOAT
+            mode: NULLABLE
+            description: "Average price change across all stocks"
+          - name: market_volatility
+            type: FLOAT
+            mode: NULLABLE
+            description: "Overall market volatility measure"
+          - name: sector_performance
+            type: RECORD
+            mode: REPEATED
+            description: "Performance by sector"
+            fields:
+              - name: sector_name
+                type: STRING
+              - name: average_return
+                type: FLOAT
+              - name: total_volume
+                type: INTEGER
+              - name: stock_count
+                type: INTEGER
+          - name: summary_timestamp
+            type: TIMESTAMP
+            mode: REQUIRED
+      timePartitioning:
+        type: DAY
+        field: date
+
+
+# OUTPUTS
+# =============================================================================
+outputs:
+  - name: datasetId
+    value: {{ properties["datasetId"] }}
+  
+  - name: rawStockDataTable
+    value: "{{ properties["project"] }}.{{ properties["datasetId"] }}.raw_stock_data"
+  
+  - name: processedStockDataTable
+    value: "{{ properties["project"] }}.{{ properties["datasetId"] }}.processed_stock_data"
+  
+  - name: technicalIndicatorsTable
+    value: "{{ properties["project"] }}.{{ properties["datasetId"] }}.technical_indicators"
+  
+  - name: marketSummaryTable
+    value: "{{ properties["project"] }}.{{ properties["datasetId"] }}.market_summary"
