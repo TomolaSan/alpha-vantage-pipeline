@@ -1,0 +1,262 @@
+# =============================================================================
+# Cloud Functions Configuration for Pipeline Orchestration
+# =============================================================================
+# 
+# Creates Cloud Functions that orchestrate the data pipeline:
+# - GCS Data Trigger: Monitors raw data bucket for new files
+# - Dataproc Launcher: Creates clusters and submits PySpark jobs
+# - Pipeline orchestration and error handling
+#
+# =============================================================================
+
+resources:
+  # =============================================================================
+  # PUB/SUB TOPICS FOR PIPELINE EVENTS
+  # =============================================================================
+  - name: raw-data-notifications
+    type: pubsub.v1.topic
+    properties:
+      topic: financial-raw-data-notifications
+
+  - name: processing-completed-notifications
+    type: pubsub.v1.topic
+    properties:
+      topic: financial-processing-completed
+
+  - name: pipeline-errors
+    type: pubsub.v1.topic
+    properties:
+      topic: financial-pipeline-errors
+
+  # =============================================================================
+  # CLOUD FUNCTION 1: GCS Data Trigger
+  # =============================================================================
+  - name: gcs-data-trigger-function
+    type: gcp-types/cloudfunctions-v1:projects.locations.functions
+    properties:
+      parent: projects/{{ properties["project"] }}/locations/{{ properties["region"] }}
+      function: gcs-data-trigger
+      sourceArchiveUrl: gs://{{ properties["codeBucket"] }}/cloud-functions/gcs-trigger.zip
+      entryPoint: handle_gcs_event
+      runtime: python39
+      timeout: 540s
+      availableMemoryMb: 256
+      
+      # Environment variables
+      environmentVariables:
+        GCP_PROJECT: {{ properties["project"] }}
+        RAW_DATA_BUCKET: {{ properties["rawDataBucket"] }}
+        PROCESSED_DATA_BUCKET: {{ properties["processedDataBucket"] }}
+        CODE_BUCKET: {{ properties["codeBucket"] }}
+        DATAPROC_REGION: {{ properties["region"] }}
+        NOTIFICATION_TOPIC: financial-raw-data-notifications
+      
+      # Service account
+      serviceAccountEmail: {{ properties["serviceAccount"] }}
+      
+      # Event trigger - responds to GCS bucket changes
+      eventTrigger:
+        eventType: google.storage.object.finalize
+        resource: projects/_/buckets/{{ properties["rawDataBucket"] }}
+        failurePolicy:
+          retry: {}
+      
+      # Labels
+      labels:
+        component: pipeline-orchestration
+        function-type: gcs-trigger
+
+  # =============================================================================
+  # CLOUD FUNCTION 2: Dataproc Job Launcher
+  # =============================================================================
+  - name: dataproc-launcher-function
+    type: gcp-types/cloudfunctions-v1:projects.locations.functions
+    properties:
+      parent: projects/{{ properties["project"] }}/locations/{{ properties["region"] }}
+      function: dataproc-launcher
+      sourceArchiveUrl: gs://{{ properties["codeBucket"] }}/cloud-functions/dataproc-launcher.zip
+      entryPoint: launch_dataproc_job
+      runtime: python39
+      timeout: 540s
+      availableMemoryMb: 512
+      
+      # Environment variables
+      environmentVariables:
+        GCP_PROJECT: {{ properties["project"] }}
+        DATAPROC_REGION: {{ properties["region"] }}
+        DATAPROC_CLUSTER_NAME: financial-processing-cluster
+        RAW_DATA_BUCKET: {{ properties["rawDataBucket"] }}
+        PROCESSED_DATA_BUCKET: {{ properties["processedDataBucket"] }}
+        CODE_BUCKET: {{ properties["codeBucket"] }}
+        BIGQUERY_DATASET: financial_data
+        PYSPARK_JOB_FILE: gs://{{ properties["codeBucket"] }}/dataproc/financial-data-transformer.py
+        NOTIFICATION_TOPIC: financial-processing-completed
+        ERROR_TOPIC: financial-pipeline-errors
+      
+      # Service account
+      serviceAccountEmail: {{ properties["serviceAccount"] }}
+      
+      # Pub/Sub trigger
+      eventTrigger:
+        eventType: google.pubsub.topic.publish
+        resource: projects/{{ properties["project"] }}/topics/financial-raw-data-notifications
+        failurePolicy:
+          retry: {}
+      
+      # Labels
+      labels:
+        component: pipeline-orchestration
+        function-type: dataproc-launcher
+
+  # =============================================================================
+  # CLOUD FUNCTION 3: Pipeline Status Monitor
+  # =============================================================================
+  - name: pipeline-monitor-function
+    type: gcp-types/cloudfunctions-v1:projects.locations.functions
+    properties:
+      parent: projects/{{ properties["project"] }}/locations/{{ properties["region"] }}
+      function: pipeline-monitor
+      sourceArchiveUrl: gs://{{ properties["codeBucket"] }}/cloud-functions/pipeline-monitor.zip
+      entryPoint: monitor_pipeline_status
+      runtime: python39
+      timeout: 300s
+      availableMemoryMb: 256
+      
+      # Environment variables
+      environmentVariables:
+        GCP_PROJECT: {{ properties["project"] }}
+        MONITORING_INTERVAL: "300"  # 5 minutes
+        SLACK_WEBHOOK_URL: ""  # Optional Slack notifications
+        EMAIL_ALERTS: ""       # Optional email alerts
+        ERROR_TOPIC: financial-pipeline-errors
+      
+      # Service account
+      serviceAccountEmail: {{ properties["serviceAccount"] }}
+      
+      # HTTP trigger for manual status checks
+      httpsTrigger: {}
+      
+      # Labels
+      labels:
+        component: pipeline-monitoring
+        function-type: status-monitor
+
+  # =============================================================================
+  # CLOUD FUNCTION 4: Data Quality Checker
+  # =============================================================================
+  - name: data-quality-checker-function
+    type: gcp-types/cloudfunctions-v1:projects.locations.functions
+    properties:
+      parent: projects/{{ properties["project"] }}/locations/{{ properties["region"] }}
+      function: data-quality-checker
+      sourceArchiveUrl: gs://{{ properties["codeBucket"] }}/cloud-functions/data-quality-checker.zip
+      entryPoint: check_data_quality
+      runtime: python39
+      timeout: 300s
+      availableMemoryMb: 512
+      
+      # Environment variables
+      environmentVariables:
+        GCP_PROJECT: {{ properties["project"] }}
+        BIGQUERY_DATASET: financial_data
+        RAW_DATA_TABLE: raw_stock_data
+        PROCESSED_DATA_TABLE: processed_stock_data
+        QUALITY_THRESHOLD: "0.95"  # 95% data quality threshold
+        ERROR_TOPIC: financial-pipeline-errors
+      
+      # Service account
+      serviceAccountEmail: {{ properties["serviceAccount"] }}
+      
+      # Pub/Sub trigger - runs after processing completes
+      eventTrigger:
+        eventType: google.pubsub.topic.publish
+        resource: projects/{{ properties["project"] }}/topics/financial-processing-completed
+        failurePolicy:
+          retry: {}
+      
+      # Labels
+      labels:
+        component: data-quality
+        function-type: quality-checker
+
+  # =============================================================================
+  # CLOUD SCHEDULER JOBS FOR AUTOMATED PIPELINE RUNS
+  # =============================================================================
+  - name: daily-data-ingestion-job
+    type: gcp-types/cloudscheduler-v1:projects.locations.jobs
+    properties:
+      parent: projects/{{ properties["project"] }}/locations/{{ properties["region"] }}
+      name: daily-financial-data-ingestion
+      description: "Triggers daily financial data ingestion"
+      schedule: "0 18 * * 1-5"  # 6 PM weekdays (after market close)
+      timeZone: "America/New_York"
+      
+      # HTTP target to trigger NiFi flow
+      httpTarget:
+        uri: http://$(ref.nifi-compute-instance.externalIP):8080/nifi-api/flow/process-groups/root/processors/start
+        httpMethod: POST
+        headers:
+          Content-Type: application/json
+        body: |
+          {
+            "component": {
+              "id": "alpha-vantage-processor",
+              "state": "RUNNING"
+            }
+          }
+      
+      # Retry configuration
+      retryConfig:
+        retryCount: 3
+        maxRetryDuration: 600s
+        minBackoffDuration: 5s
+        maxBackoffDuration: 300s
+
+  - name: weekly-data-quality-report
+    type: gcp-types/cloudscheduler-v1:projects.locations.jobs
+    properties:
+      parent: projects/{{ properties["project"] }}/locations/{{ properties["region"] }}
+      name: weekly-data-quality-report
+      description: "Generates weekly data quality reports"
+      schedule: "0 9 * * 1"  # 9 AM Mondays
+      timeZone: "America/New_York"
+      
+      # Pub/Sub target
+      pubsubTarget:
+        topicName: projects/{{ properties["project"] }}/topics/financial-pipeline-errors
+        data: |
+          {
+            "action": "generate_quality_report",
+            "period": "weekly"
+          }
+
+# =============================================================================
+# OUTPUTS
+# =============================================================================
+outputs:
+  - name: gcsDataTriggerFunction
+    value: $(ref.gcs-data-trigger-function.name)
+  
+  - name: dataprocLauncherFunction
+    value: $(ref.dataproc-launcher-function.name)
+  
+  - name: pipelineMonitorFunction
+    value: $(ref.pipeline-monitor-function.name)
+  
+  - name: dataQualityCheckerFunction
+    value: $(ref.data-quality-checker-function.name)
+  
+  - name: rawDataNotificationsTopic
+    value: $(ref.raw-data-notifications.name)
+  
+  - name: processingCompletedTopic
+    value: $(ref.processing-completed-notifications.name)
+  
+  - name: pipelineErrorsTopic
+    value: $(ref.pipeline-errors.name)
+  
+  - name: dailyIngestionJobName
+    value: $(ref.daily-data-ingestion-job.name)
+  
+  - name: weeklyQualityReportJobName
+    value: $(ref.weekly-data-quality-report.name)

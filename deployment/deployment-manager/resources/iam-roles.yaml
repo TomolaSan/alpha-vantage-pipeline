@@ -1,0 +1,208 @@
+
+# IAM Roles and Service Account Configuration
+
+# 
+# Creates the service account and IAM roles needed for the financial data pipeline:
+# - Service account for all pipeline components
+# - Cloud Storage access (read/write buckets)
+# - BigQuery access (create tables, insert data)
+# - Dataproc access (create clusters, submit jobs)
+# - Cloud Functions access (trigger functions)
+#
+# =============================================================================
+
+resources:
+  
+  # SERVICE ACCOUNT - Main identity for all pipeline components
+  
+  - name: {{ properties["serviceAccountName"] }}
+    type: iam.v1.serviceAccount
+    properties:
+      accountId: {{ properties["serviceAccountName"] }}
+      displayName: "Financial Data Pipeline Service Account"
+      description: "Service account for automated financial data processing pipeline"
+
+ 
+  # CLOUD STORAGE ADMIN ROLE
+ 
+  - name: storage-admin-binding
+    type: gcp-types/cloudresourcemanager-v1:virtual.projects.iamMemberBinding
+    properties:
+      resource: {{ properties["project"] }}
+      role: roles/storage.objectAdmin
+      member: serviceAccount:$(ref.{{ properties["serviceAccountName"] }}.email)
+    metadata:
+      dependsOn:
+        - {{ properties["serviceAccountName"] }}
+
+  
+  # BIGQUERY DATA EDITOR ROLE
+ 
+  - name: bigquery-data-editor-binding
+    type: gcp-types/cloudresourcemanager-v1:virtual.projects.iamMemberBinding
+    properties:
+      resource: {{ properties["project"] }}
+      role: roles/bigquery.dataEditor
+      member: serviceAccount:$(ref.{{ properties["serviceAccountName"] }}.email)
+    metadata:
+      dependsOn:
+        - {{ properties["serviceAccountName"] }}
+
+ 
+  # BIGQUERY JOB USER ROLE
+  # =============================================================================
+  - name: bigquery-job-user-binding
+    type: gcp-types/cloudresourcemanager-v1:virtual.projects.iamMemberBinding
+    properties:
+      resource: {{ properties["project"] }}
+      role: roles/bigquery.jobUser
+      member: serviceAccount:$(ref.{{ properties["serviceAccountName"] }}.email)
+    metadata:
+      dependsOn:
+        - {{ properties["serviceAccountName"] }}
+
+  # =============================================================================
+  # DATAPROC EDITOR ROLE
+  # =============================================================================
+  - name: dataproc-editor-binding
+    type: gcp-types/cloudresourcemanager-v1:virtual.projects.iamMemberBinding
+    properties:
+      resource: {{ properties["project"] }}
+      role: roles/dataproc.editor
+      member: serviceAccount:$(ref.{{ properties["serviceAccountName"] }}.email)
+    metadata:
+      dependsOn:
+        - {{ properties["serviceAccountName"] }}
+
+  # =============================================================================
+  # DATAPROC WORKER ROLE (for cluster nodes)
+  # =============================================================================
+  - name: dataproc-worker-binding
+    type: gcp-types/cloudresourcemanager-v1:virtual.projects.iamMemberBinding
+    properties:
+      resource: {{ properties["project"] }}
+      role: roles/dataproc.worker
+      member: serviceAccount:$(ref.{{ properties["serviceAccountName"] }}.email)
+    metadata:
+      dependsOn:
+        - {{ properties["serviceAccountName"] }}
+
+  # =============================================================================
+  # CLOUD FUNCTIONS INVOKER ROLE
+  # =============================================================================
+  - name: cloudfunctions-invoker-binding
+    type: gcp-types/cloudresourcemanager-v1:virtual.projects.iamMemberBinding
+    properties:
+      resource: {{ properties["project"] }}
+      role: roles/cloudfunctions.invoker
+      member: serviceAccount:$(ref.{{ properties["serviceAccountName"] }}.email)
+    metadata:
+      dependsOn:
+        - {{ properties["serviceAccountName"] }}
+
+  # =============================================================================
+  # COMPUTE ENGINE INSTANCE ADMIN ROLE (for NiFi VM)
+  # =============================================================================
+  - name: compute-instance-admin-binding
+    type: gcp-types/cloudresourcemanager-v1:virtual.projects.iamMemberBinding
+    properties:
+      resource: {{ properties["project"] }}
+      role: roles/compute.instanceAdmin.v1
+      member: serviceAccount:$(ref.{{ properties["serviceAccountName"] }}.email)
+    metadata:
+      dependsOn:
+        - {{ properties["serviceAccountName"] }}
+
+  # =============================================================================
+  # PUB/SUB PUBLISHER ROLE (for notifications)
+  # =============================================================================
+  - name: pubsub-publisher-binding
+    type: gcp-types/cloudresourcemanager-v1:virtual.projects.iamMemberBinding
+    properties:
+      resource: {{ properties["project"] }}
+      role: roles/pubsub.publisher
+      member: serviceAccount:$(ref.{{ properties["serviceAccountName"] }}.email)
+    metadata:
+      dependsOn:
+        - {{ properties["serviceAccountName"] }}
+
+  # =============================================================================
+  # PUB/SUB SUBSCRIBER ROLE
+  # =============================================================================
+  - name: pubsub-subscriber-binding
+    type: gcp-types/cloudresourcemanager-v1:virtual.projects.iamMemberBinding
+    properties:
+      resource: {{ properties["project"] }}
+      role: roles/pubsub.subscriber
+      member: serviceAccount:$(ref.{{ properties["serviceAccountName"] }}.email)
+    metadata:
+      dependsOn:
+        - {{ properties["serviceAccountName"] }}
+
+  # =============================================================================
+  # CLOUD LOGGING WRITER ROLE
+  # =============================================================================
+  - name: logging-writer-binding
+    type: gcp-types/cloudresourcemanager-v1:virtual.projects.iamMemberBinding
+    properties:
+      resource: {{ properties["project"] }}
+      role: roles/logging.logWriter
+      member: serviceAccount:$(ref.{{ properties["serviceAccountName"] }}.email)
+    metadata:
+      dependsOn:
+        - {{ properties["serviceAccountName"] }}
+
+  # =============================================================================
+  # CLOUD MONITORING METRIC WRITER ROLE
+  # =============================================================================
+  - name: monitoring-writer-binding
+    type: gcp-types/cloudresourcemanager-v1:virtual.projects.iamMemberBinding
+    properties:
+      resource: {{ properties["project"] }}
+      role: roles/monitoring.metricWriter
+      member: serviceAccount:$(ref.{{ properties["serviceAccountName"] }}.email)
+    metadata:
+      dependsOn:
+        - {{ properties["serviceAccountName"] }}
+
+  # =============================================================================
+  # SECRET MANAGER ACCESS (for API keys)
+  # =============================================================================
+  - name: secret-manager-accessor-binding
+    type: gcp-types/cloudresourcemanager-v1:virtual.projects.iamMemberBinding
+    properties:
+      resource: {{ properties["project"] }}
+      role: roles/secretmanager.secretAccessor
+      member: serviceAccount:$(ref.{{ properties["serviceAccountName"] }}.email)
+    metadata:
+      dependsOn:
+        - {{ properties["serviceAccountName"] }}
+
+  # =============================================================================
+  # SERVICE ACCOUNT KEY - For local development and testing
+  # =============================================================================
+  - name: service-account-key
+    type: iam.v1.serviceAccounts.key
+    properties:
+      parent: $(ref.{{ properties["serviceAccountName"] }}.name)
+      privateKeyType: TYPE_GOOGLE_CREDENTIALS_FILE
+    metadata:
+      dependsOn:
+        - {{ properties["serviceAccountName"] }}
+
+# =============================================================================
+# OUTPUTS
+# =============================================================================
+outputs:
+  - name: serviceAccountEmail
+    value: $(ref.{{ properties["serviceAccountName"] }}.email)
+  
+  - name: serviceAccountName
+    value: $(ref.{{ properties["serviceAccountName"] }}.name)
+  
+  - name: serviceAccountUniqueId
+    value: $(ref.{{ properties["serviceAccountName"] }}.uniqueId)
+  
+  - name: serviceAccountKey
+    value: $(ref.service-account-key.privateKeyData)
+    description: "Base64 encoded service account key (keep secure!)"

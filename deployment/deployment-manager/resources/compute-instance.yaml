@@ -1,0 +1,288 @@
+# =============================================================================
+# Compute Engine Instance Configuration for Apache NiFi
+# =============================================================================
+# 
+# Creates a VM instance that will run Apache NiFi for data ingestion:
+# - Ubuntu 20.04 LTS with Java 11
+# - Apache NiFi installation and configuration
+# - Firewall rules for NiFi web interface
+# - Startup script for automatic configuration
+# - Service account for GCS and API access
+#
+# =============================================================================
+
+resources:
+  # =============================================================================
+  # FIREWALL RULE - Allow NiFi web interface access
+  # =============================================================================
+  - name: allow-nifi-ui
+    type: compute.v1.firewall
+    properties:
+      network: https://www.googleapis.com/compute/v1/projects/{{ properties["project"] }}/global/networks/default
+      direction: INGRESS
+      priority: 1000
+      targetTags:
+        - nifi-server
+      allowed:
+        - IPProtocol: TCP
+          ports:
+            - "8080"  # NiFi web interface
+            - "8443"  # NiFi secure web interface
+            - "22"    # SSH access
+      sourceRanges:
+        - "0.0.0.0/0"  # Allow from anywhere (restrict in production)
+      description: "Allow access to Apache NiFi web interface"
+
+  # =============================================================================
+  # COMPUTE ENGINE INSTANCE - NiFi Server
+  # =============================================================================
+  - name: {{ properties["instanceName"] }}
+    type: compute.v1.instance
+    properties:
+      zone: {{ properties["zone"] }}
+      machineType: https://www.googleapis.com/compute/v1/projects/{{ properties["project"] }}/zones/{{ properties["zone"] }}/machineTypes/{{ properties["machineType"] }}
+      
+      # Boot disk configuration
+      disks:
+        - deviceName: boot
+          type: PERSISTENT
+          boot: true
+          autoDelete: true
+          initializeParams:
+            sourceImage: https://www.googleapis.com/compute/v1/projects/ubuntu-os-cloud/global/images/family/ubuntu-2004-lts
+            diskType: https://www.googleapis.com/compute/v1/projects/{{ properties["project"] }}/zones/{{ properties["zone"] }}/diskTypes/pd-standard
+            diskSizeGb: {{ properties["diskSizeGb"] }}
+      
+      # Network configuration
+      networkInterfaces:
+        - network: https://www.googleapis.com/compute/v1/projects/{{ properties["project"] }}/global/networks/default
+          accessConfigs:
+            - name: External NAT
+              type: ONE_TO_ONE_NAT
+      
+      # Service account and scopes
+      serviceAccounts:
+        - email: {{ properties["serviceAccount"] }}
+          scopes:
+            - https://www.googleapis.com/auth/cloud-platform
+            - https://www.googleapis.com/auth/devstorage.full_control
+            - https://www.googleapis.com/auth/bigquery
+            - https://www.googleapis.com/auth/datastore
+            - https://www.googleapis.com/auth/logging.write
+            - https://www.googleapis.com/auth/monitoring.write
+      
+      # Instance tags for firewall rules
+      tags:
+        items:
+          - nifi-server
+          - financial-pipeline
+      
+      # Instance metadata and startup script
+      metadata:
+        items:
+          - key: startup-script
+            value: |
+              #!/bin/bash
+              
+              # =============================================================================
+              # NiFi Installation and Configuration Script
+              # =============================================================================
+              
+              set -e
+              
+              # Update system packages
+              apt-get update
+              apt-get upgrade -y
+              
+              # Install required packages
+              apt-get install -y \
+                  openjdk-11-jdk \
+                  wget \
+                  curl \
+                  unzip \
+                  git \
+                  python3 \
+                  python3-pip \
+                  htop \
+                  nano
+              
+              # Set JAVA_HOME
+              export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+              echo 'export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64' >> /etc/environment
+              
+              # Create nifi user
+              useradd -m -s /bin/bash nifi
+              
+              # Download and install Apache NiFi
+              NIFI_VERSION="1.21.0"
+              NIFI_HOME="/opt/nifi"
+              
+              cd /opt
+              wget "https://downloads.apache.org/nifi/${NIFI_VERSION}/nifi-${NIFI_VERSION}-bin.tar.gz"
+              tar -xzf "nifi-${NIFI_VERSION}-bin.tar.gz"
+              mv "nifi-${NIFI_VERSION}" nifi
+              chown -R nifi:nifi /opt/nifi
+              
+              # Configure NiFi properties
+              cat > /opt/nifi/conf/nifi.properties << 'EOF'
+              # Core Properties
+              nifi.flow.configuration.file=./conf/flow.xml.gz
+              nifi.flow.configuration.archive.enabled=true
+              nifi.flow.configuration.archive.dir=./conf/archive/
+              nifi.flowcontroller.autoResumeState=true
+              nifi.flowcontroller.graceful.shutdown.period=10 sec
+              nifi.flowservice.writedelay.interval=500 ms
+              nifi.administrative.yield.duration=30 sec
+              nifi.bored.yield.duration=10 millis
+              nifi.queue.backpressure.count=10000
+              nifi.queue.backpressure.size=1 GB
+              
+              # Web Properties
+              nifi.web.http.host=0.0.0.0
+              nifi.web.http.port=8080
+              nifi.web.http.network.interface.default=
+              
+              # Security Properties (disabled for simplicity)
+              nifi.sensitive.props.key=
+              nifi.sensitive.props.algorithm=PBEWITHMD5ANDDES
+              nifi.sensitive.props.provider=BC
+              nifi.sensitive.props.additional.keys=
+              
+              # Cluster Common Properties
+              nifi.cluster.protocol.heartbeat.interval=5 sec
+              nifi.cluster.protocol.is.secure=false
+              
+              # State Management
+              nifi.state.management.configuration.file=./conf/state-management.xml
+              nifi.state.management.provider.local=local-provider
+              nifi.state.management.provider.cluster=zk-provider
+              
+              # Repository Properties
+              nifi.repository.directory=./repositories
+              nifi.flowfile.repository.implementation=org.apache.nifi.controller.repository.WriteAheadFlowFileRepository
+              nifi.flowfile.repository.directory=./flowfile_repository
+              nifi.content.repository.implementation=org.apache.nifi.controller.repository.FileSystemRepository
+              nifi.content.repository.directory.default=./content_repository
+              nifi.provenance.repository.implementation=org.apache.nifi.provenance.WriteAheadProvenanceRepository
+              nifi.provenance.repository.directory.default=./provenance_repository
+              nifi.provenance.repository.max.storage.time=24 hours
+              nifi.provenance.repository.max.storage.size=1 GB
+              
+              # Component Status Repository
+              nifi.components.status.repository.implementation=org.apache.nifi.controller.status.history.VolatileComponentStatusRepository
+              nifi.components.status.repository.buffer.size=1440
+              nifi.components.status.snapshot.frequency=1 min
+              
+              # Variable Registry Properties
+              nifi.variable.registry.properties=./conf/custom.properties
+              EOF
+              
+              # Create custom properties file with environment variables
+              cat > /opt/nifi/conf/custom.properties << EOF
+              # Financial Pipeline Configuration
+              alpha.vantage.api.key={{ env["ALPHA_VANTAGE_API_KEY"] | default("ALPHA_VANTAGE_KEY_PLACEHOLDER") }}
+              gcs.raw.data.bucket={{ properties["rawDataBucket"] }}
+              gcs.code.bucket={{ properties["codeBucket"] }}
+              gcp.project.id={{ properties["project"] }}
+              stock.symbols={{ env["STOCK_SYMBOLS"] | default("AAPL,GOOGL,MSFT,AMZN,TSLA") }}
+              EOF
+              
+              # Set up NiFi as a service
+              cat > /etc/systemd/system/nifi.service << 'EOF'
+              [Unit]
+              Description=Apache NiFi
+              After=network.target
+              
+              [Service]
+              Type=forking
+              User=nifi
+              Group=nifi
+              ExecStart=/opt/nifi/bin/nifi.sh start
+              ExecStop=/opt/nifi/bin/nifi.sh stop
+              ExecReload=/opt/nifi/bin/nifi.sh restart
+              
+              [Install]
+              WantedBy=multi-user.target
+              EOF
+              
+              # Create log directory
+              mkdir -p /var/log/nifi
+              chown nifi:nifi /var/log/nifi
+              
+              # Install Google Cloud SDK
+              echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+              curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add -
+              apt-get update
+              apt-get install -y google-cloud-sdk
+              
+              # Install Python dependencies for data processing
+              pip3 install \
+                  google-cloud-storage \
+                  google-cloud-bigquery \
+                  pandas \
+                  requests \
+                  alpha-vantage
+              
+              # Create directories and set permissions
+              mkdir -p /opt/nifi/logs
+              mkdir -p /opt/nifi/repositories
+              mkdir -p /opt/nifi/flowfile_repository
+              mkdir -p /opt/nifi/content_repository
+              mkdir -p /opt/nifi/provenance_repository
+              chown -R nifi:nifi /opt/nifi
+              
+              # Enable and start NiFi service
+              systemctl daemon-reload
+              systemctl enable nifi
+              systemctl start nifi
+              
+              # Create a simple health check script
+              cat > /opt/check_nifi.sh << 'EOF'
+              #!/bin/bash
+              if systemctl is-active --quiet nifi; then
+                  echo "NiFi is running"
+                  exit 0
+              else
+                  echo "NiFi is not running"
+                  exit 1
+              fi
+              EOF
+              chmod +x /opt/check_nifi.sh
+              
+              # Log installation completion
+              echo "$(date): NiFi installation completed successfully" >> /var/log/nifi-install.log
+              echo "NiFi will be available at http://$(curl -s http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip -H "Metadata-Flavor: Google"):8080" >> /var/log/nifi-install.log
+          
+          - key: gcs-raw-bucket
+            value: {{ properties["rawDataBucket"] }}
+          
+          - key: gcs-code-bucket
+            value: {{ properties["codeBucket"] }}
+          
+          - key: project-id
+            value: {{ properties["project"] }}
+
+      # Labels for resource organization
+      labels:
+        component: nifi
+        environment: dev
+        project: financial-pipeline
+
+# =============================================================================
+# OUTPUTS
+# =============================================================================
+outputs:
+  - name: instanceName
+    value: $(ref.{{ properties["instanceName"] }}.name)
+  
+  - name: internalIP
+    value: $(ref.{{ properties["instanceName"] }}.networkInterfaces[0].networkIP)
+  
+  - name: externalIP
+    value: $(ref.{{ properties["instanceName"] }}.networkInterfaces[0].accessConfigs[0].natIP)
+  
+  - name: nifiWebInterface
+    value: http://$(ref.{{ properties["instanceName"] }}.networkInterfaces[0].accessConfigs[0].natIP):8080
+  
+  - name: sshCommand
+    value: gcloud compute ssh {{ properties["instanceName"] }} --zone={{ properties["zone"] }}
