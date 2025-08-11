@@ -1,0 +1,211 @@
+# =============================================================================
+# Environment Variables Template
+# =============================================================================
+# 
+# INSTRUCTIONS:
+# 1. Copy this file to: config/environment-variables.env
+# 2. Fill in your actual values (DO NOT commit the .env file to git!)
+# 3. Source this file before running scripts: source config/environment-variables.env
+#
+# SECURITY NOTE: This template is safe to commit. The actual .env file is in .gitignore
+# =============================================================================
+
+# =============================================================================
+# GCP PROJECT CONFIGURATION
+# =============================================================================
+
+# Your GCP Project ID (required)
+export GCP_PROJECT_ID="your-gcp-project-id"
+
+# GCP Region for resources (recommended: us-central1, us-east1, europe-west1)
+export GCP_REGION="us-central1"
+
+# GCP Zone for compute instances
+export GCP_ZONE="us-central1-a"
+
+# Service Account Email (will be created during setup)
+export GCP_SERVICE_ACCOUNT_EMAIL="financial-pipeline@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
+
+# =============================================================================
+# API KEYS AND EXTERNAL SERVICES
+# =============================================================================
+
+# Alpha Vantage API Key (REQUIRED - get from: https://www.alphavantage.co/support/#api-key)
+export ALPHA_VANTAGE_API_KEY="your-alpha-vantage-api-key-here"
+
+# Optional: Other financial data APIs
+export YAHOO_FINANCE_API_KEY=""
+export QUANDL_API_KEY=""
+export FRED_API_KEY=""
+
+# =============================================================================
+# GCS BUCKET CONFIGURATION
+# =============================================================================
+
+# Raw data bucket (where NiFi dumps initial data)
+export GCS_RAW_DATA_BUCKET="${GCP_PROJECT_ID}-financial-raw-data"
+
+# Processed data bucket (where Spark outputs transformed data)
+export GCS_PROCESSED_DATA_BUCKET="${GCP_PROJECT_ID}-financial-processed-data"
+
+# Backup bucket (for BigQuery exports and backups)
+export GCS_BACKUP_BUCKET="${GCP_PROJECT_ID}-financial-backups"
+
+# Code and scripts bucket (for Dataproc job files)
+export GCS_CODE_BUCKET="${GCP_PROJECT_ID}-financial-code"
+
+# =============================================================================
+# BIGQUERY CONFIGURATION
+# =============================================================================
+
+# BigQuery dataset for financial data
+export BQ_DATASET_ID="financial_data"
+
+# BigQuery tables
+export BQ_RAW_TABLE="raw_stock_data"
+export BQ_PROCESSED_TABLE="processed_stock_data"
+export BQ_INDICATORS_TABLE="technical_indicators"
+
+# =============================================================================
+# COMPUTE ENGINE CONFIGURATION
+# =============================================================================
+
+# NiFi instance configuration
+export NIFI_INSTANCE_NAME="financial-nifi-vm"
+export NIFI_MACHINE_TYPE="e2-standard-4"
+export NIFI_DISK_SIZE="100GB"
+
+# =============================================================================
+# DATAPROC CONFIGURATION
+# =============================================================================
+
+# Dataproc cluster configuration
+export DATAPROC_CLUSTER_NAME="financial-processing-cluster"
+export DATAPROC_NUM_WORKERS="2"
+export DATAPROC_WORKER_MACHINE_TYPE="e2-standard-4"
+export DATAPROC_MASTER_MACHINE_TYPE="e2-standard-4"
+export DATAPROC_PREEMPTIBLE="true"
+
+# =============================================================================
+# CLOUD FUNCTIONS CONFIGURATION
+# =============================================================================
+
+# Cloud Function names
+export CF_GCS_TRIGGER="gcs-data-trigger"
+export CF_DATAPROC_LAUNCHER="dataproc-job-launcher"
+
+# Cloud Function runtime
+export CF_RUNTIME="python39"
+export CF_MEMORY="256MB"
+export CF_TIMEOUT="540s"
+
+# =============================================================================
+# NETWORKING CONFIGURATION
+# =============================================================================
+
+# VPC and networking (optional - uses default if not specified)
+export VPC_NETWORK="default"
+export VPC_SUBNET="default"
+
+# Firewall rules
+export NIFI_FIREWALL_RULE="allow-nifi-ui"
+export NIFI_PORT="8080"
+
+# =============================================================================
+# DATA PROCESSING CONFIGURATION
+# =============================================================================
+
+# Stock symbols to process (comma-separated)
+export STOCK_SYMBOLS="AAPL,GOOGL,MSFT,AMZN,TSLA,META,NVDA,JPM,JNJ,V"
+
+# Data processing schedule (cron format)
+export DATA_INGESTION_SCHEDULE="0 18 * * 1-5"  # 6 PM weekdays (after market close)
+export DATA_PROCESSING_SCHEDULE="0 19 * * 1-5"  # 7 PM weekdays
+
+# Technical indicators to calculate
+export TECHNICAL_INDICATORS="SMA,EMA,RSI,MACD,BOLLINGER_BANDS"
+
+# =============================================================================
+# MONITORING AND ALERTING
+# =============================================================================
+
+# Email for alerts (optional)
+export ALERT_EMAIL="your-email@example.com"
+
+# Slack webhook for notifications (optional)
+export SLACK_WEBHOOK_URL=""
+
+# =============================================================================
+# DEVELOPMENT AND TESTING
+# =============================================================================
+
+# Environment type (dev, staging, prod)
+export ENVIRONMENT="dev"
+
+# Debug mode
+export DEBUG_MODE="true"
+
+# Sample data size for testing
+export SAMPLE_DATA_DAYS="30"
+
+# =============================================================================
+# COST OPTIMIZATION
+# =============================================================================
+
+# Auto-shutdown for development (in minutes)
+export AUTO_SHUTDOWN_MINUTES="60"
+
+# Use preemptible instances where possible
+export USE_PREEMPTIBLE="true"
+
+# GCS lifecycle policies
+export GCS_RAW_DATA_RETENTION_DAYS="30"
+export GCS_PROCESSED_DATA_RETENTION_DAYS="365"
+
+# =============================================================================
+# SAMPLE VALUES FOR QUICK SETUP
+# =============================================================================
+
+# Uncomment and modify these for quick local development:
+# export GCP_PROJECT_ID="my-financial-pipeline-dev"
+# export GCP_REGION="us-central1"
+# export ALPHA_VANTAGE_API_KEY="83ZGR7D0LY31JDG5"
+# export STOCK_SYMBOLS="AAPL,GOOGL,MSFT"
+# export ENVIRONMENT="dev"
+
+# =============================================================================
+# VALIDATION FUNCTION
+# =============================================================================
+
+# Function to validate required environment variables
+validate_environment() {
+    local required_vars=(
+        "GCP_PROJECT_ID"
+        "GCP_REGION"
+        "ALPHA_VANTAGE_API_KEY"
+    )
+    
+    local missing_vars=()
+    
+    for var in "${required_vars[@]}"; do
+        if [[ -z "${!var}" ]]; then
+            missing_vars+=("$var")
+        fi
+    done
+    
+    if [[ ${#missing_vars[@]} -gt 0 ]]; then
+        echo "❌ Missing required environment variables:"
+        printf '   - %s\n' "${missing_vars[@]}"
+        echo ""
+        echo "Please set these variables in config/environment-variables.env"
+        return 1
+    else
+        echo "✅ All required environment variables are set!"
+        return 0
+    fi
+}
+
+# Run validation when sourced
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    validate_environment
+fi
